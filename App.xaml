@@ -10,15 +10,15 @@
                 <ResourceDictionary Source="Themes/DarkTheme.xaml"/>
                 <ResourceDictionary Source="Themes/SharedStyles.xaml"/>
             </ResourceDictionary.MergedDictionaries>
-            
+
             <!-- Converters -->
             <converters:BoolToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
             <converters:IndexToBoolConverter x:Key="IndexToBoolConverter"/>
             <converters:IndexToVisibilityConverter x:Key="IndexToVisibilityConverter"/>
             <converters:PercentToWidthConverter x:Key="PercentToWidthConverter"/>
             <converters:InverseBoolConverter x:Key="InverseBoolConverter"/>
+            <converters:InverseBoolToVisibilityConverter x:Key="InverseBoolToVisibilityConverter"/>
             <converters:StorageUsageToBrushConverter x:Key="StorageUsageToBrushConverter"/>
         </ResourceDictionary>
     </Application.Resources>
 </Application>
-
