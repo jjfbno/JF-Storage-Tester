@@ -66,6 +66,8 @@ public class MainViewModel : BaseViewModel
         // Commands
         OpenSettingsCommand = new RelayCommand(OpenSettings);
         RefreshDrivesCommand = new RelayCommand(RefreshDrives);
+        OpenDiskManagementCommand = new RelayCommand(OpenDiskManagement);
+        OpenDiskPartCommand = new RelayCommand(OpenDiskPart);
         
         // Subscribe to theme changes to update UI
         _themeService.ThemeChanged += (s, e) => OnPropertyChanged(nameof(CurrentTheme));
@@ -110,6 +112,7 @@ public class MainViewModel : BaseViewModel
             {
                 OnPropertyChanged(nameof(CanChangeDrive));
                 OnPropertyChanged(nameof(CanChangeTab));
+                OnPropertyChanged(nameof(CanRefreshDrives));
             }
         }
     }
@@ -119,6 +122,8 @@ public class MainViewModel : BaseViewModel
     public bool CanChangeDrive => !IsTestRunning;
     
     public bool CanChangeTab => !IsTestRunning;
+    
+    public bool CanRefreshDrives => !IsTestRunning;
     
     public bool CanUseSpeedTest => SelectedDrive != null && !SelectedDrive.IsBitLockerLocked;
     
@@ -132,6 +137,8 @@ public class MainViewModel : BaseViewModel
     // Commands
     public ICommand OpenSettingsCommand { get; }
     public ICommand RefreshDrivesCommand { get; }
+    public ICommand OpenDiskManagementCommand { get; }
+    public ICommand OpenDiskPartCommand { get; }
     
     private void OpenSettings()
     {
@@ -145,5 +152,32 @@ public class MainViewModel : BaseViewModel
     private void RefreshDrives()
     {
         _driveService.RefreshDrives();
+    }
+    
+    private void OpenDiskManagement()
+    {
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "diskmgmt.msc",
+                UseShellExecute = true
+            });
+        }
+        catch { }
+    }
+    
+    private void OpenDiskPart()
+    {
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "cmd.exe",
+                Arguments = "/k diskpart",
+                UseShellExecute = true
+            });
+        }
+        catch { }
     }
 }

@@ -110,6 +110,7 @@
                     </ComboBox>
                     <Button Content="⟳" 
                             Command="{Binding RefreshDrivesCommand}"
+                            IsEnabled="{Binding CanRefreshDrives}"
                             Style="{StaticResource IconButtonStyle}"
                             ToolTip="Refresh drives"
                             FontSize="18"
@@ -160,10 +161,25 @@
                         <TextBlock Text="{Binding SelectedDrive.FileSystem}" 
                                    Style="{StaticResource ValueTextStyle}"/>
                     </StackPanel>
-                    <StackPanel>
+                    <StackPanel Margin="0,0,20,0">
                         <TextBlock Text="PARTITION" Style="{StaticResource LabelTextStyle}"/>
                         <TextBlock Text="{Binding SelectedDrive.PartitionSchemeDisplay}" 
                                    Style="{StaticResource ValueTextStyle}"/>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="10,0,0,0">
+                        <Button Content="💽"
+                                Command="{Binding OpenDiskManagementCommand}"
+                                Style="{StaticResource IconButtonStyle}"
+                                ToolTip="Open Disk Management"
+                                FontSize="16"
+                                Margin="0,0,6,0"/>
+                        <Button Content="&gt;_"
+                                Command="{Binding OpenDiskPartCommand}"
+                                Style="{StaticResource IconButtonStyle}"
+                                ToolTip="Open DiskPart"
+                                FontSize="16"
+                                FontFamily="Consolas"
+                                FontWeight="Bold"/>
                     </StackPanel>
                 </StackPanel>
                 
@@ -255,3 +271,5 @@
         </Grid>
     </Grid>
 </Window>
+
+

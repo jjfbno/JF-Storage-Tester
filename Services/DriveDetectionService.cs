@@ -72,7 +72,8 @@ public class DriveDetectionService : IDisposable
         {
             try
             {
-                var currentDrives = GetAllDrivesQuick();
+                // Use full GetAllDrives to get partition scheme and other details
+                var currentDrives = GetAllDrives();
                 
                 var dispatcher = System.Windows.Application.Current?.Dispatcher;
                 if (dispatcher == null) return;
