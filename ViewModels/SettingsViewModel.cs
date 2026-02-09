@@ -87,7 +87,13 @@ public class SettingsViewModel : BaseViewModel
     public bool UpdateAvailable
     {
         get => _updateAvailable;
-        set => SetProperty(ref _updateAvailable, value);
+        set
+        {
+            if (SetProperty(ref _updateAvailable, value))
+            {
+                (InstallUpdateCommand as RelayCommand)?.RaiseCanExecuteChanged();
+            }
+        }
     }
     
     private string _latestVersion = "";

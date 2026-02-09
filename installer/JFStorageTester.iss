@@ -2,7 +2,7 @@
 ; Copyright (c) 2026 JF
 
 #define MyAppName "JF Storage Tester"
-#define MyAppVersion "1.0.1"
+#define MyAppVersion "1.0.3"
 #define MyAppPublisher "JF"
 #define MyAppExeName "JFStorageTester.exe"
 
@@ -48,3 +48,6 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent runascurrentuser
+
+
+
