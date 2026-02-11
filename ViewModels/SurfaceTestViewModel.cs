@@ -37,6 +37,7 @@ public class SurfaceTestViewModel : BaseViewModel
     private long _totalSectors;
     private long _goodSectors;
     private long _badSectors;
+    private long _slowSectors;
     private string _elapsedTime = "00:00:00";
     private string _remainingTime = "--:--:--";
     private int _gridColumns = 50;
@@ -45,15 +46,17 @@ public class SurfaceTestViewModel : BaseViewModel
     // Dynamic heat map calibration
     private double _minReadTimeMs = double.MaxValue;
     private double _maxReadTimeMs = double.MinValue;
-    private const double WarningTimeMs = 500.0; // Very slow threshold for yellow
+    private const double SlowThresholdMs = 200.0;   // Sectors taking >200ms are flagged as slow (yellow)
+    private const double WarningTimeMs = 500.0;      // Very slow threshold
 
     // Result overlay
     private bool _showResultOverlay;
     private bool _testPassed;
+    private bool _testHasWarnings;
 
     private static readonly SolidColorBrush BadColor = new(System.Windows.Media.Color.FromRgb(244, 67, 54));
     private static readonly SolidColorBrush PendingColor = new(System.Windows.Media.Color.FromRgb(60, 60, 60));
-    private static readonly SolidColorBrush WarningColor = new(System.Windows.Media.Color.FromRgb(255, 193, 7));
+    private static readonly SolidColorBrush SlowColor = new(System.Windows.Media.Color.FromRgb(255, 193, 7)); // Yellow for slow sectors
 
     public SurfaceTestViewModel()
     {
@@ -67,6 +70,7 @@ public class SurfaceTestViewModel : BaseViewModel
         TotalSectors = 0;
         GoodSectors = 0;
         BadSectors = 0;
+        SlowSectors = 0;
 
         InitializeSectorBlocks();
     }
@@ -110,8 +114,30 @@ public class SurfaceTestViewModel : BaseViewModel
         TotalSectors = 0;
         GoodSectors = 0;
         BadSectors = 0;
+        SlowSectors = 0;
         ElapsedTime = "00:00:00";
         RemainingTime = "--:--:--";
+    }
+
+    /// <summary>
+    /// Called when the drive is physically removed during a test.
+    /// </summary>
+    public void StopTestFromDriveRemoval()
+    {
+        if (!IsRunning) return;
+        
+        _testService.StopTest();
+        _elapsedTimer?.Stop();
+        _elapsedTimer?.Dispose();
+        _elapsedTimer = null;
+        IsRunning = false;
+        RemainingTime = "--:--:--";
+        
+        Application.Current?.Dispatcher.Invoke(() =>
+        {
+            MessageBox.Show("The drive was removed during the test. Test has been stopped.",
+                "Drive Removed", MessageBoxButton.OK, MessageBoxImage.Warning);
+        });
     }
 
     public bool IsRunning
@@ -148,6 +174,12 @@ public class SurfaceTestViewModel : BaseViewModel
         set => SetProperty(ref _testPassed, value);
     }
 
+    public bool TestHasWarnings
+    {
+        get => _testHasWarnings;
+        set => SetProperty(ref _testHasWarnings, value);
+    }
+
     public double ProgressPercent
     {
         get => _progressPercent;
@@ -176,6 +208,12 @@ public class SurfaceTestViewModel : BaseViewModel
     {
         get => _badSectors;
         set => SetProperty(ref _badSectors, value);
+    }
+
+    public long SlowSectors
+    {
+        get => _slowSectors;
+        set => SetProperty(ref _slowSectors, value);
     }
 
     public string ElapsedTime
@@ -223,6 +261,7 @@ public class SurfaceTestViewModel : BaseViewModel
         AverageSpeed = 0;
         GoodSectors = 0;
         BadSectors = 0;
+        SlowSectors = 0;
         ElapsedTime = "00:00:00";
         RemainingTime = "--:--:--";
         ResetBlocks();
@@ -232,7 +271,8 @@ public class SurfaceTestViewModel : BaseViewModel
         _elapsedTimer.Elapsed += (s, e) => UpdateElapsedTime();
         _elapsedTimer.Start();
 
-        await _testService.StartTestAsync(selectedDrive.DriveLetter, TotalBlocks);
+        // Use the physical drive path directly for full-disk scan
+        await _testService.StartTestAsync(selectedDrive.DeviceId, TotalBlocks);
     }
 
     private void StopTest()
@@ -253,6 +293,7 @@ public class SurfaceTestViewModel : BaseViewModel
             TotalSectors = progress.TotalSectors;
             GoodSectors = progress.GoodSectors;
             BadSectors = progress.BadSectors;
+            SlowSectors = progress.SlowSectors;
             AverageSpeed = progress.AverageSpeedMBps;
 
             if (progress.BlockIndex >= 0 && progress.BlockIndex < SectorBlocks.Count)
@@ -260,8 +301,8 @@ public class SurfaceTestViewModel : BaseViewModel
                 var block = SectorBlocks[progress.BlockIndex];
                 block.ReadTimeMs = progress.BlockReadTimeMs;
 
-                // Update min/max for calibration (only for good blocks)
-                if (progress.BlockIsGood && progress.BlockReadTimeMs > 0)
+                // Update min/max for calibration (only for good, non-slow blocks)
+                if (progress.BlockIsGood && progress.BlockReadTimeMs > 0 && progress.BlockReadTimeMs < SlowThresholdMs)
                 {
                     bool rangeChanged = false;
                     if (progress.BlockReadTimeMs < _minReadTimeMs)
@@ -269,13 +310,13 @@ public class SurfaceTestViewModel : BaseViewModel
                         _minReadTimeMs = progress.BlockReadTimeMs;
                         rangeChanged = true;
                     }
-                    if (progress.BlockReadTimeMs > _maxReadTimeMs && progress.BlockReadTimeMs < WarningTimeMs)
+                    if (progress.BlockReadTimeMs > _maxReadTimeMs)
                     {
                         _maxReadTimeMs = progress.BlockReadTimeMs;
                         rangeChanged = true;
                     }
 
-                    // If range changed significantly and we have enough data, recalculate all colors
+                    // Recalculate colors periodically when range changes
                     if (rangeChanged && progress.BlockIndex > 50 && progress.BlockIndex % 50 == 0)
                     {
                         RecalculateAllBlockColors();
@@ -315,8 +356,9 @@ public class SurfaceTestViewModel : BaseViewModel
         if (!isGood)
             return BadColor;
 
-        if (readTimeMs >= WarningTimeMs)
-            return WarningColor;
+        // Flag slow sectors as yellow
+        if (readTimeMs >= SlowThresholdMs)
+            return SlowColor;
 
         // Use dynamic calibration based on observed min/max
         var minTime = _minReadTimeMs;
@@ -325,24 +367,19 @@ public class SurfaceTestViewModel : BaseViewModel
         // Ensure we have valid range
         if (minTime >= maxTime || minTime == double.MaxValue)
         {
-            // No calibration yet, use fixed bright green
             return new SolidColorBrush(System.Windows.Media.Color.FromRgb(76, 175, 80));
         }
 
-        // Add a small buffer to the range for better distribution
         var range = maxTime - minTime;
-        if (range < 0.1) range = 0.1; // Minimum range to avoid division issues
+        if (range < 0.1) range = 0.1;
 
-        // Calculate factor (0 = fastest/min, 1 = slowest/max)
         var factor = (readTimeMs - minTime) / range;
         factor = Math.Max(0, Math.Min(1, factor));
 
         // Interpolate from bright green to dark green
-        // Bright green: RGB(76, 175, 80) - fastest
-        // Dark green:   RGB(15, 50, 18)  - slowest (made darker for more contrast)
-        byte r = (byte)(76 - (61 * factor));    // 76 -> 15
-        byte g = (byte)(175 - (125 * factor));  // 175 -> 50
-        byte b = (byte)(80 - (62 * factor));    // 80 -> 18
+        byte r = (byte)(76 - (61 * factor));
+        byte g = (byte)(175 - (125 * factor));
+        byte b = (byte)(80 - (62 * factor));
 
         return new SolidColorBrush(System.Windows.Media.Color.FromRgb(r, g, b));
     }
@@ -364,8 +401,9 @@ public class SurfaceTestViewModel : BaseViewModel
             {
                 ProgressPercent = 100;
 
-                // Show simple PASS/FAIL overlay
+                // Show PASS/FAIL/WARNING overlay
                 TestPassed = BadSectors == 0;
+                TestHasWarnings = SlowSectors > 0 && BadSectors == 0;
                 ShowResultOverlay = true;
             }
         });

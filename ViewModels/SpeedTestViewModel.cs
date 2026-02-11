@@ -1,5 +1,7 @@
+using System.Collections.Generic;
 using System.Windows;
 using System.Windows.Input;
+using JFStorageTester.Models;
 using JFStorageTester.Services;
 
 namespace JFStorageTester.ViewModels;
@@ -13,6 +15,8 @@ public class SpeedTestViewModel : BaseViewModel
     private double _progressPercent;
     private string _currentOperation = "Ready";
     private double _currentSpeed;
+    private List<PartitionInfoModel>? _partitions;
+    private PartitionInfoModel? _selectedPartition;
 
     // Results
     private double _sequentialReadSpeed = -1;
@@ -29,6 +33,24 @@ public class SpeedTestViewModel : BaseViewModel
         StartStopCommand = new RelayCommand(ToggleTest);
     }
 
+    /// <summary>
+    /// Available partitions on the selected physical disk (set by MainViewModel).
+    /// </summary>
+    public List<PartitionInfoModel>? Partitions
+    {
+        get => _partitions;
+        set => SetProperty(ref _partitions, value);
+    }
+
+    /// <summary>
+    /// Currently selected partition for speed testing (set by MainViewModel).
+    /// </summary>
+    public PartitionInfoModel? SelectedPartition
+    {
+        get => _selectedPartition;
+        set => SetProperty(ref _selectedPartition, value);
+    }
+
     public void ResetResults()
     {
         SequentialReadSpeed = -1;
@@ -38,6 +60,24 @@ public class SpeedTestViewModel : BaseViewModel
         ProgressPercent = 0;
         CurrentOperation = "Ready";
         CurrentSpeed = 0;
+    }
+
+    /// <summary>
+    /// Called when the drive is physically removed during a test.
+    /// </summary>
+    public void StopTestFromDriveRemoval()
+    {
+        if (!IsRunning) return;
+        
+        _testService.StopTest();
+        IsRunning = false;
+        CurrentOperation = "Drive Removed";
+        
+        Application.Current?.Dispatcher.Invoke(() =>
+        {
+            MessageBox.Show("The drive was removed during the speed test. Test has been stopped.",
+                "Drive Removed", MessageBoxButton.OK, MessageBoxImage.Warning);
+        });
     }
 
     public bool IsRunning
@@ -164,21 +204,25 @@ public class SpeedTestViewModel : BaseViewModel
 
     private async void StartTest()
     {
-        var mainVm = Application.Current?.MainWindow?.DataContext as MainViewModel;
-        var selectedDrive = mainVm?.SelectedDrive;
+        var selectedPartition = SelectedPartition;
 
-        if (selectedDrive == null)
+        if (selectedPartition == null)
         {
-            MessageBox.Show("Please select a drive first.", "No Drive Selected",
+            MessageBox.Show("Please select a partition for the speed test.", "No Partition Selected",
                 MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
 
         // Warn about write tests
+        // Determine test file size for display
+        var mainVm2 = Application.Current?.MainWindow?.DataContext as MainViewModel;
+        var driveTypeForSize = mainVm2?.SelectedDrive?.DriveType ?? Models.StorageType.Unknown;
+        var testFileSize = (driveTypeForSize is Models.StorageType.NVMe or Models.StorageType.SSD or Models.StorageType.HDD) ? "1 GB" : "256 MB";
+
         if (IncludeWriteTests)
         {
             var result = MessageBox.Show(
-                $"Write tests will create a temporary 256 MB file on {selectedDrive.DriveLetter}\n\n" +
+                $"Write tests will create a temporary {testFileSize} file on {selectedPartition.DriveLetter}\n\n" +
                 "The file will be automatically deleted after the test.\n\n" +
                 "Continue with write tests?",
                 "Write Test Confirmation",
@@ -200,7 +244,11 @@ public class SpeedTestViewModel : BaseViewModel
         CurrentOperation = "Starting...";
         CurrentSpeed = 0;
 
-        await _testService.StartTestAsync(selectedDrive.DriveLetter, IncludeWriteTests);
+        // Get the drive type from MainViewModel for dynamic test sizing
+        var mainVm = Application.Current?.MainWindow?.DataContext as MainViewModel;
+        var driveType = mainVm?.SelectedDrive?.DriveType ?? Models.StorageType.Unknown;
+
+        await _testService.StartTestAsync(selectedPartition.DriveLetter, IncludeWriteTests, driveType);
     }
 
     private void StopTest()

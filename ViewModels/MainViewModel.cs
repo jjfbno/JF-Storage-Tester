@@ -11,8 +11,9 @@ public class MainViewModel : BaseViewModel
     private readonly DriveDetectionService _driveService;
     private readonly ThemeService _themeService;
     
-    private DriveInfoModel? _selectedDrive;
-    private int _selectedTabIndex = 0;  // Explicitly default to Surface Test tab
+    private PhysicalDiskModel? _selectedDrive;
+    private PartitionInfoModel? _selectedPartition;
+    private int _selectedTabIndex = 0;
     private bool _isTestRunning;
     
     // Child ViewModels
@@ -43,10 +44,26 @@ public class MainViewModel : BaseViewModel
             {
                 OnPropertyChanged(nameof(Drives));
                 
+                if (IsTestRunning)
+                {
+                    // Don't change selection during tests, but check if our drive was removed
+                    if (SelectedDrive != null)
+                    {
+                        var stillExists = Drives.Any(d => d.DiskNumber == SelectedDrive.DiskNumber);
+                        if (!stillExists)
+                        {
+                            // Drive was removed during test - stop the test
+                            SurfaceTestViewModel.StopTestFromDriveRemoval();
+                            SpeedTestViewModel.StopTestFromDriveRemoval();
+                        }
+                    }
+                    return;
+                }
+                
                 // Reselect drive if it still exists, otherwise select first
                 if (SelectedDrive != null)
                 {
-                    var existingDrive = Drives.FirstOrDefault(d => d.DriveLetter == SelectedDrive.DriveLetter);
+                    var existingDrive = Drives.FirstOrDefault(d => d.DiskNumber == SelectedDrive.DiskNumber);
                     if (existingDrive != null)
                     {
                         SelectedDrive = existingDrive;
@@ -73,9 +90,9 @@ public class MainViewModel : BaseViewModel
         _themeService.ThemeChanged += (s, e) => OnPropertyChanged(nameof(CurrentTheme));
     }
     
-    public ObservableCollection<DriveInfoModel> Drives { get; }
+    public ObservableCollection<PhysicalDiskModel> Drives { get; }
     
-    public DriveInfoModel? SelectedDrive
+    public PhysicalDiskModel? SelectedDrive
     {
         get => _selectedDrive;
         set
@@ -83,12 +100,26 @@ public class MainViewModel : BaseViewModel
             var previousDrive = _selectedDrive;
             if (SetProperty(ref _selectedDrive, value))
             {
+                OnPropertyChanged(nameof(IsDriveSelected));
                 OnPropertyChanged(nameof(CanUseSpeedTest));
                 OnPropertyChanged(nameof(SpeedTestLockedMessage));
-                OnPropertyChanged(nameof(IsDriveSelected));
+                OnPropertyChanged(nameof(Partitions));
+                
+                // Push partition data to SpeedTestViewModel
+                SpeedTestViewModel.Partitions = value?.Partitions;
+                
+                // Auto-select best partition for speed test
+                if (value != null)
+                {
+                    SelectedPartition = value.BestSpeedTestPartition;
+                }
+                else
+                {
+                    SelectedPartition = null;
+                }
                 
                 // Reset test results when drive changes
-                if (previousDrive != null && value != null && previousDrive.DriveLetter != value.DriveLetter)
+                if (previousDrive != null && value != null && previousDrive.DiskNumber != value.DiskNumber)
                 {
                     SurfaceTestViewModel.ResetBlocks();
                     SpeedTestViewModel.ResetResults();
@@ -96,6 +127,30 @@ public class MainViewModel : BaseViewModel
             }
         }
     }
+    
+    /// <summary>
+    /// The currently selected partition for speed testing.
+    /// </summary>
+    public PartitionInfoModel? SelectedPartition
+    {
+        get => _selectedPartition;
+        set
+        {
+            if (SetProperty(ref _selectedPartition, value))
+            {
+                OnPropertyChanged(nameof(CanUseSpeedTest));
+                OnPropertyChanged(nameof(SpeedTestLockedMessage));
+                
+                // Sync to SpeedTestViewModel
+                SpeedTestViewModel.SelectedPartition = value;
+            }
+        }
+    }
+    
+    /// <summary>
+    /// Partitions of the currently selected physical disk.
+    /// </summary>
+    public List<PartitionInfoModel>? Partitions => SelectedDrive?.Partitions;
     
     public int SelectedTabIndex
     {
@@ -125,12 +180,20 @@ public class MainViewModel : BaseViewModel
     
     public bool CanRefreshDrives => !IsTestRunning;
     
-    public bool CanUseSpeedTest => SelectedDrive != null && !SelectedDrive.IsBitLockerLocked;
+    public bool CanUseSpeedTest => SelectedDrive != null && SelectedPartition != null 
+        && !SelectedPartition.IsBitLockerLocked;
     
-    public string SpeedTestLockedMessage => 
-        SelectedDrive?.IsBitLockerLocked == true 
-            ? "Speed test unavailable: Drive is BitLocker locked" 
-            : "";
+    public string SpeedTestLockedMessage
+    {
+        get
+        {
+            if (SelectedDrive == null) return "";
+            if (SelectedDrive.Partitions.Count == 0) return "No partitions found on this disk";
+            if (SelectedPartition?.IsBitLockerLocked == true) return "Speed test unavailable: Partition is BitLocker locked";
+            if (SelectedDrive.HasBitLockerLocked) return "Some partitions are BitLocker locked";
+            return "";
+        }
+    }
     
     public AppTheme CurrentTheme => _themeService.CurrentTheme;
     

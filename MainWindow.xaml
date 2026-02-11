@@ -84,13 +84,18 @@
                         <ComboBox.ItemTemplate>
                             <DataTemplate>
                                 <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="{Binding DriveLetter}" 
-                                               FontWeight="SemiBold"
-                                               Foreground="{DynamicResource PrimaryTextBrush}"/>
+                                    <TextBlock FontWeight="SemiBold"
+                                               Foreground="{DynamicResource PrimaryTextBrush}">
+                                        <Run Text="Disk "/><Run Text="{Binding DiskNumber, Mode=OneWay}"/>
+                                    </TextBlock>
                                     <TextBlock Text=" - " 
                                                Foreground="{DynamicResource SecondaryTextBrush}"/>
-                                    <TextBlock Text="{Binding VolumeName}" 
+                                    <TextBlock Text="{Binding Model}" 
                                                Foreground="{DynamicResource PrimaryTextBrush}"/>
+                                    <TextBlock Foreground="{DynamicResource SecondaryTextBrush}"
+                                               Margin="6,0,0,0">
+                                        <Run Text="("/><Run Text="{Binding TotalSizeDisplay, Mode=OneWay}"/><Run Text=")"/>
+                                    </TextBlock>
                                     <Border Background="{DynamicResource AccentBrush}"
                                             CornerRadius="3"
                                             Padding="6,2"
@@ -100,10 +105,6 @@
                                                    FontWeight="SemiBold"
                                                    Foreground="White"/>
                                     </Border>
-                                    <TextBlock Text="{Binding BitLockerDisplay}" 
-                                               Margin="10,0,0,0"
-                                               Foreground="{DynamicResource WarningBrush}"
-                                               Visibility="{Binding IsBitLockerProtected, Converter={StaticResource BoolToVisibilityConverter}}"/>
                                 </StackPanel>
                             </DataTemplate>
                         </ComboBox.ItemTemplate>
@@ -147,22 +148,17 @@
                                    Style="{StaticResource ValueTextStyle}"/>
                     </StackPanel>
                     <StackPanel Margin="0,0,20,0">
-                        <TextBlock Text="USED" Style="{StaticResource LabelTextStyle}"/>
-                        <TextBlock Text="{Binding SelectedDrive.UsedSpaceDisplay}" 
-                                   Style="{StaticResource ValueTextStyle}"/>
-                    </StackPanel>
-                    <StackPanel Margin="0,0,20,0">
-                        <TextBlock Text="FREE" Style="{StaticResource LabelTextStyle}"/>
-                        <TextBlock Text="{Binding SelectedDrive.FreeSpaceDisplay}" 
+                        <TextBlock Text="PARTITIONS" Style="{StaticResource LabelTextStyle}"/>
+                        <TextBlock Text="{Binding SelectedDrive.PartitionLetters}" 
                                    Style="{StaticResource ValueTextStyle}"/>
                     </StackPanel>
                     <StackPanel Margin="0,0,20,0">
                         <TextBlock Text="FILE SYSTEM" Style="{StaticResource LabelTextStyle}"/>
-                        <TextBlock Text="{Binding SelectedDrive.FileSystem}" 
+                        <TextBlock Text="{Binding SelectedDrive.FileSystemDisplay}" 
                                    Style="{StaticResource ValueTextStyle}"/>
                     </StackPanel>
                     <StackPanel Margin="0,0,20,0">
-                        <TextBlock Text="PARTITION" Style="{StaticResource LabelTextStyle}"/>
+                        <TextBlock Text="SCHEME" Style="{StaticResource LabelTextStyle}"/>
                         <TextBlock Text="{Binding SelectedDrive.PartitionSchemeDisplay}" 
                                    Style="{StaticResource ValueTextStyle}"/>
                     </StackPanel>

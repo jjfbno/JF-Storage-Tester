@@ -18,7 +18,7 @@
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="260"/>
+                    <RowDefinition Height="280"/>
                 </Grid.RowDefinitions>
 
                 <!-- Grid Header -->
@@ -145,7 +145,7 @@
                         </Grid>
 
                         <!-- Bad Sectors -->
-                        <Grid>
+                        <Grid Margin="0,0,0,4">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
@@ -158,6 +158,22 @@
                                        Text="{Binding BadSectors, StringFormat={}{0:N0}}"
                                        Style="{StaticResource ValueTextStyle}"
                                        Foreground="{DynamicResource ErrorBrush}"/>
+                        </Grid>
+
+                        <!-- Slow Sectors -->
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Orientation="Horizontal">
+                                <Ellipse Width="8" Height="8" Fill="#FFC107" Margin="0,0,6,0"/>
+                                <TextBlock Text="Slow Sectors" Style="{StaticResource BodyTextStyle}"/>
+                            </StackPanel>
+                            <TextBlock Grid.Column="1"
+                                       Text="{Binding SlowSectors, StringFormat={}{0:N0}}"
+                                       Style="{StaticResource ValueTextStyle}"
+                                       Foreground="#FFC107"/>
                         </Grid>
                     </StackPanel>
                 </Border>
@@ -212,15 +228,47 @@
                 Visibility="{Binding ShowResultOverlay, Converter={StaticResource BoolToVisibilityConverter}}"
                 MouseLeftButtonDown="ResultOverlay_Click">
             <Grid>
-                <!-- PASS -->
+                <!-- PASS (no bad, no slow) -->
                 <TextBlock Text="PASS"
                            FontSize="120"
                            FontWeight="Bold"
                            Foreground="#4CAF50"
                            HorizontalAlignment="Center"
-                           VerticalAlignment="Center"
-                           Visibility="{Binding TestPassed, Converter={StaticResource BoolToVisibilityConverter}}"/>
-                <!-- FAIL -->
+                           VerticalAlignment="Center">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                            <Style.Triggers>
+                                <MultiDataTrigger>
+                                    <MultiDataTrigger.Conditions>
+                                        <Condition Binding="{Binding TestPassed}" Value="True"/>
+                                        <Condition Binding="{Binding TestHasWarnings}" Value="False"/>
+                                    </MultiDataTrigger.Conditions>
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                </MultiDataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+                <!-- WARN (slow sectors, no bad) -->
+                <TextBlock Text="WARN"
+                           FontSize="120"
+                           FontWeight="Bold"
+                           Foreground="#FFC107"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Center">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding TestHasWarnings}" Value="True">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+                <!-- FAIL (bad sectors) -->
                 <TextBlock Text="FAIL"
                            FontSize="120"
                            FontWeight="Bold"
@@ -229,11 +277,15 @@
                            VerticalAlignment="Center">
                     <TextBlock.Style>
                         <Style TargetType="TextBlock">
-                            <Setter Property="Visibility" Value="Visible"/>
+                            <Setter Property="Visibility" Value="Collapsed"/>
                             <Style.Triggers>
-                                <DataTrigger Binding="{Binding TestPassed}" Value="True">
-                                    <Setter Property="Visibility" Value="Collapsed"/>
-                                </DataTrigger>
+                                <MultiDataTrigger>
+                                    <MultiDataTrigger.Conditions>
+                                        <Condition Binding="{Binding TestPassed}" Value="False"/>
+                                        <Condition Binding="{Binding TestHasWarnings}" Value="False"/>
+                                    </MultiDataTrigger.Conditions>
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                </MultiDataTrigger>
                             </Style.Triggers>
                         </Style>
                     </TextBlock.Style>

@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
@@ -26,9 +26,36 @@ public class SpeedTestService
 {
     private const int SequentialBlockSize = 1024 * 1024; // 1 MB blocks for sequential
     private const int Random4KBlockSize = 4096; // 4 KB blocks for random
-    private const int TestFileSizeMB = 1024; // 1 GB test file for accuracy
-    private const int Random4KIterations = 4096; // More iterations for better accuracy
-    private const int TestPasses = 3; // Run each test multiple times and average
+
+    // Dynamic test parameters based on drive type
+    private int _testFileSizeMB = 1024;
+    private int _random4KIterations = 4096;
+    private int _testPasses = 3;
+
+    private void ConfigureForDriveType(Models.StorageType driveType)
+    {
+        switch (driveType)
+        {
+            case Models.StorageType.NVMe:
+            case Models.StorageType.SSD:
+                _testFileSizeMB = 1024;       // 1 GB
+                _random4KIterations = 4096;
+                _testPasses = 3;
+                break;
+            case Models.StorageType.HDD:
+                _testFileSizeMB = 1024;       // 1 GB
+                _random4KIterations = 2048;
+                _testPasses = 3;
+                break;
+            case Models.StorageType.USB:
+            case Models.StorageType.eMMC:
+            default:
+                _testFileSizeMB = 256;        // 256 MB
+                _random4KIterations = 1024;
+                _testPasses = 2;
+                break;
+        }
+    }
 
     // P/Invoke for unbuffered I/O
     private const uint GENERIC_READ = 0x80000000;
@@ -59,12 +86,13 @@ public class SpeedTestService
 
     public bool IsRunning => _isRunning;
 
-    public async Task StartTestAsync(string driveLetter, bool includeWriteTests)
+    public async Task StartTestAsync(string driveLetter, bool includeWriteTests, Models.StorageType driveType = Models.StorageType.Unknown)
     {
         if (_isRunning) return;
 
         _isRunning = true;
         _cts = new CancellationTokenSource();
+        ConfigureForDriveType(driveType);
 
         var result = new SpeedTestResult();
         string? testFilePath = null;
@@ -84,10 +112,10 @@ public class SpeedTestService
             }
 
             // Check available space - need 2x test file size for safety
-            long requiredSpace = (long)TestFileSizeMB * 1024 * 1024 * 2;
+            long requiredSpace = (long)_testFileSizeMB * 1024 * 1024 * 2;
             if (driveInfo.AvailableFreeSpace < requiredSpace)
             {
-                throw new IOException($"Not enough free space. Need at least {TestFileSizeMB * 2} MB free.");
+                throw new IOException($"Not enough free space. Need at least {_testFileSizeMB * 2} MB free.");
             }
 
             if (includeWriteTests)
@@ -186,7 +214,7 @@ public class SpeedTestService
         using var fs = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None,
             SequentialBlockSize, FileOptions.WriteThrough);
 
-        int totalBlocks = TestFileSizeMB;
+        int totalBlocks = _testFileSizeMB;
         for (int i = 0; i < totalBlocks; i++)
         {
             ct.ThrowIfCancellationRequested();
@@ -202,7 +230,7 @@ public class SpeedTestService
     {
         var results = new List<double>();
         
-        for (int pass = 0; pass < TestPasses; pass++)
+        for (int pass = 0; pass < _testPasses; pass++)
         {
             ct.ThrowIfCancellationRequested();
             
@@ -210,7 +238,7 @@ public class SpeedTestService
             results.Add(speed);
             
             // Small delay between passes to let drive settle
-            if (pass < TestPasses - 1)
+            if (pass < _testPasses - 1)
                 Thread.Sleep(100);
         }
         
@@ -245,7 +273,7 @@ public class SpeedTestService
         var sw = Stopwatch.StartNew();
         long totalBytesWritten = 0;
 
-        int totalBlocks = TestFileSizeMB;
+        int totalBlocks = _testFileSizeMB;
         for (int i = 0; i < totalBlocks; i++)
         {
             ct.ThrowIfCancellationRequested();
@@ -258,8 +286,8 @@ public class SpeedTestService
                 var elapsed = sw.Elapsed.TotalSeconds;
                 var currentSpeed = elapsed > 0 ? totalBytesWritten / elapsed / (1024 * 1024) : 0;
                 var passProgress = (double)i / totalBlocks;
-                var overallProgress = ((double)passNumber + passProgress) / TestPasses * 25;
-                ReportProgress($"Sequential Write (Pass {passNumber + 1}/{TestPasses})", overallProgress, currentSpeed);
+                var overallProgress = ((double)passNumber + passProgress) / _testPasses * 25;
+                ReportProgress($"Sequential Write (Pass {passNumber + 1}/{_testPasses})", overallProgress, currentSpeed);
             }
         }
 
@@ -274,7 +302,7 @@ public class SpeedTestService
     {
         var results = new List<double>();
         
-        for (int pass = 0; pass < TestPasses; pass++)
+        for (int pass = 0; pass < _testPasses; pass++)
         {
             ct.ThrowIfCancellationRequested();
             
@@ -282,7 +310,7 @@ public class SpeedTestService
             results.Add(speed);
             
             // Small delay between passes
-            if (pass < TestPasses - 1)
+            if (pass < _testPasses - 1)
                 Thread.Sleep(100);
         }
         
@@ -329,8 +357,8 @@ public class SpeedTestService
                 var elapsed = sw.Elapsed.TotalSeconds;
                 var currentSpeed = elapsed > 0 ? totalBytesRead / elapsed / (1024 * 1024) : 0;
                 var passProgress = (double)totalBytesRead / fileSize;
-                var overallProgress = 25 + ((double)passNumber + passProgress) / TestPasses * 25;
-                ReportProgress($"Sequential Read (Pass {passNumber + 1}/{TestPasses})", overallProgress, currentSpeed);
+                var overallProgress = 25 + ((double)passNumber + passProgress) / _testPasses * 25;
+                ReportProgress($"Sequential Read (Pass {passNumber + 1}/{_testPasses})", overallProgress, currentSpeed);
             }
         }
 
@@ -344,14 +372,14 @@ public class SpeedTestService
     {
         var results = new List<double>();
         
-        for (int pass = 0; pass < TestPasses; pass++)
+        for (int pass = 0; pass < _testPasses; pass++)
         {
             ct.ThrowIfCancellationRequested();
             
             var speed = RunRandom4KWriteTest(path, ct, pass);
             results.Add(speed);
             
-            if (pass < TestPasses - 1)
+            if (pass < _testPasses - 1)
                 Thread.Sleep(100);
         }
         
@@ -385,7 +413,7 @@ public class SpeedTestService
         var sw = Stopwatch.StartNew();
         long totalBytesWritten = 0;
 
-        for (int i = 0; i < Random4KIterations; i++)
+        for (int i = 0; i < _random4KIterations; i++)
         {
             ct.ThrowIfCancellationRequested();
 
@@ -401,9 +429,9 @@ public class SpeedTestService
             {
                 var elapsed = sw.Elapsed.TotalSeconds;
                 var currentSpeed = elapsed > 0 ? totalBytesWritten / elapsed / (1024 * 1024) : 0;
-                var passProgress = (double)i / Random4KIterations;
-                var overallProgress = 50 + ((double)passNumber + passProgress) / TestPasses * 25;
-                ReportProgress($"Random 4K Write (Pass {passNumber + 1}/{TestPasses})", overallProgress, currentSpeed);
+                var passProgress = (double)i / _random4KIterations;
+                var overallProgress = 50 + ((double)passNumber + passProgress) / _testPasses * 25;
+                ReportProgress($"Random 4K Write (Pass {passNumber + 1}/{_testPasses})", overallProgress, currentSpeed);
             }
         }
 
@@ -418,14 +446,14 @@ public class SpeedTestService
     {
         var results = new List<double>();
         
-        for (int pass = 0; pass < TestPasses; pass++)
+        for (int pass = 0; pass < _testPasses; pass++)
         {
             ct.ThrowIfCancellationRequested();
             
             var speed = RunRandom4KReadTest(path, ct, pass);
             results.Add(speed);
             
-            if (pass < TestPasses - 1)
+            if (pass < _testPasses - 1)
                 Thread.Sleep(100);
         }
         
@@ -458,7 +486,7 @@ public class SpeedTestService
         var sw = Stopwatch.StartNew();
         long totalBytesRead = 0;
 
-        for (int i = 0; i < Random4KIterations; i++)
+        for (int i = 0; i < _random4KIterations; i++)
         {
             ct.ThrowIfCancellationRequested();
 
@@ -474,9 +502,9 @@ public class SpeedTestService
             {
                 var elapsed = sw.Elapsed.TotalSeconds;
                 var currentSpeed = elapsed > 0 ? totalBytesRead / elapsed / (1024 * 1024) : 0;
-                var passProgress = (double)i / Random4KIterations;
-                var overallProgress = 75 + ((double)passNumber + passProgress) / TestPasses * 25;
-                ReportProgress($"Random 4K Read (Pass {passNumber + 1}/{TestPasses})", overallProgress, currentSpeed);
+                var passProgress = (double)i / _random4KIterations;
+                var overallProgress = 75 + ((double)passNumber + passProgress) / _testPasses * 25;
+                ReportProgress($"Random 4K Read (Pass {passNumber + 1}/{_testPasses})", overallProgress, currentSpeed);
             }
         }
 

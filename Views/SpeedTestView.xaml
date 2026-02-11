@@ -15,18 +15,53 @@
         <Border Grid.Row="0" 
                 Style="{StaticResource CardStyle}"
                 Margin="0,0,0,12">
-            <StackPanel Orientation="Horizontal">
-                <CheckBox Content="Include Write Tests"
-                          IsChecked="{Binding IncludeWriteTests}"
-                          IsEnabled="{Binding IsNotRunning}"
-                          Foreground="{DynamicResource PrimaryTextBrush}"
-                          VerticalAlignment="Center"/>
-                <TextBlock Text="(creates a temporary 256 MB test file)"
-                           Style="{StaticResource BodyTextStyle}"
-                           Foreground="{DynamicResource SecondaryTextBrush}"
-                           Margin="8,0,0,0"
-                           VerticalAlignment="Center"/>
-            </StackPanel>
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                
+                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                    <CheckBox Content="Include Write Tests"
+                              IsChecked="{Binding IncludeWriteTests}"
+                              IsEnabled="{Binding IsNotRunning}"
+                              Foreground="{DynamicResource PrimaryTextBrush}"
+                              VerticalAlignment="Center"/>
+                    <TextBlock Text="(creates a temporary 256 MB test file)"
+                               Style="{StaticResource BodyTextStyle}"
+                               Foreground="{DynamicResource SecondaryTextBrush}"
+                               Margin="8,0,0,0"
+                               VerticalAlignment="Center"/>
+                </StackPanel>
+                
+                <!-- Partition Selector -->
+                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="Partition:" 
+                               Style="{StaticResource BodyTextStyle}"
+                               VerticalAlignment="Center"
+                               Margin="0,0,8,0"/>
+                    <ComboBox ItemsSource="{Binding Partitions}"
+                              SelectedItem="{Binding SelectedPartition}"
+                              Style="{StaticResource ModernComboBoxStyle}"
+                              IsEnabled="{Binding IsNotRunning}"
+                              MinWidth="160">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="{Binding DriveLetter}" 
+                                               FontWeight="SemiBold"
+                                               Foreground="{DynamicResource PrimaryTextBrush}"/>
+                                    <TextBlock Foreground="{DynamicResource SecondaryTextBrush}"
+                                               Margin="6,0,0,0">
+                                        <Run Text="("/><Run Text="{Binding FreeSpaceDisplay, Mode=OneWay}"/><Run Text=" free)"/>
+                                    </TextBlock>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+                </StackPanel>
+            </Grid>
         </Border>
         
         <!-- Speed Test Results Grid -->

@@ -13,6 +13,7 @@ public class SurfaceTestProgress
     public long TotalBytes { get; set; }
     public long GoodSectors { get; set; }
     public long BadSectors { get; set; }
+    public long SlowSectors { get; set; }
     public double AverageSpeedMBps { get; set; }
     public double CurrentSpeedMBps { get; set; }
     public int BlockIndex { get; set; }
@@ -95,11 +96,12 @@ public class SurfaceTestService
     public event EventHandler<string>? ErrorOccurred;
 
     /// <summary>
-    /// Starts a READ-ONLY surface test on the specified drive.
+    /// Starts a READ-ONLY surface test on the specified physical drive.
+    /// Accepts a physical drive path like \\.\PhysicalDrive0
     /// This performs a FULL sequential read of the entire drive surface.
     /// This will NOT write any data to the drive - it only reads sectors.
     /// </summary>
-    public async Task StartTestAsync(string driveLetter, int totalBlocks = 1000)
+    public async Task StartTestAsync(string physicalDrivePath, int totalBlocks = 1000)
     {
         if (_isRunning)
             return;
@@ -109,7 +111,7 @@ public class SurfaceTestService
 
         try
         {
-            await Task.Run(() => RunSurfaceTest(driveLetter, totalBlocks, _cts.Token));
+            await Task.Run(() => RunPhysicalDriveSurfaceTest(physicalDrivePath, totalBlocks, _cts.Token));
         }
         catch (OperationCanceledException)
         {
@@ -131,47 +133,7 @@ public class SurfaceTestService
         _cts?.Cancel();
     }
 
-    private void RunSurfaceTest(string driveLetter, int totalBlocks, CancellationToken ct)
-    {
-        var letter = driveLetter.TrimEnd(':', '\\').ToUpper();
-        var physicalDrive = GetPhysicalDriveFromLetter(letter);
-
-        if (string.IsNullOrEmpty(physicalDrive))
-        {
-            RunVolumeSurfaceTest(letter, totalBlocks, ct);
-            return;
-        }
-
-        RunPhysicalDriveSurfaceTest(physicalDrive, letter, totalBlocks, ct);
-    }
-
-    private void RunVolumeSurfaceTest(string driveLetter, int totalBlocks, CancellationToken ct)
-    {
-        var volumePath = $"\\\\.\\{driveLetter}:";
-
-        using var handle = CreateFile(
-            volumePath,
-            GENERIC_READ,
-            FILE_SHARE_READ | FILE_SHARE_WRITE,
-            IntPtr.Zero,
-            OPEN_EXISTING,
-            FILE_FLAG_NO_BUFFERING | FILE_FLAG_SEQUENTIAL_SCAN,
-            IntPtr.Zero);
-
-        if (handle.IsInvalid)
-        {
-            throw new Win32Exception(Marshal.GetLastWin32Error(),
-                $"Cannot open volume {driveLetter}:. Try running as Administrator.");
-        }
-
-        var driveInfo = new DriveInfo(driveLetter + ":");
-        var totalSize = driveInfo.TotalSize;
-        var bytesPerSector = 512;
-
-        PerformFullSequentialRead(handle, totalSize, bytesPerSector, totalBlocks, ct);
-    }
-
-    private void RunPhysicalDriveSurfaceTest(string physicalDrive, string driveLetter, int totalBlocks, CancellationToken ct)
+    private void RunPhysicalDriveSurfaceTest(string physicalDrive, int totalBlocks, CancellationToken ct)
     {
         using var handle = CreateFile(
             physicalDrive,
@@ -184,8 +146,8 @@ public class SurfaceTestService
 
         if (handle.IsInvalid)
         {
-            RunVolumeSurfaceTest(driveLetter, totalBlocks, ct);
-            return;
+            throw new Win32Exception(Marshal.GetLastWin32Error(),
+                $"Cannot open physical drive {physicalDrive}. Try running as Administrator.");
         }
 
         var geometryEx = new DISK_GEOMETRY_EX();
@@ -205,9 +167,8 @@ public class SurfaceTestService
             }
             else
             {
-                Marshal.FreeHGlobal(geometryPtr);
-                RunVolumeSurfaceTest(driveLetter, totalBlocks, ct);
-                return;
+                throw new Win32Exception(Marshal.GetLastWin32Error(),
+                    $"Cannot read disk geometry for {physicalDrive}. Try running as Administrator.");
             }
         }
         finally
@@ -223,29 +184,27 @@ public class SurfaceTestService
     private void PerformFullSequentialRead(SafeFileHandle handle, long totalSize, int bytesPerSector, int totalBlocks, CancellationToken ct)
     {
         // Use 64KB chunks for reading - small enough for granularity, large enough for efficiency
-        // This matches what most professional tools use
         const int chunkSize = 64 * 1024; // 64 KB
         var alignedChunkSize = (chunkSize / bytesPerSector) * bytesPerSector;
         if (alignedChunkSize == 0) alignedChunkSize = bytesPerSector;
 
-        var sectorsPerChunk = alignedChunkSize / bytesPerSector;
         var totalSectors = totalSize / bytesPerSector;
-        var totalChunks = (totalSize + alignedChunkSize - 1) / alignedChunkSize;
         
-        // Calculate bytes per visual block
-        var bytesPerBlock = totalSize / totalBlocks;
+        // Slow sector threshold in milliseconds (per 64KB chunk)
+        const double slowThresholdMs = 200.0;
 
         var buffer = new byte[alignedChunkSize];
         var stopwatch = new Stopwatch();
 
         long goodSectors = 0;
         long badSectors = 0;
+        long slowSectors = 0;
         long totalBytesRead = 0;
         long currentPosition = 0;
         var overallStopwatch = Stopwatch.StartNew();
 
-        int currentBlockIndex = 0;
-        long bytesInCurrentBlock = 0;
+        // Track per-block state using position-based block index calculation
+        int lastBlockIndex = -1;
         bool currentBlockHasBadSectors = false;
         double currentBlockTotalTimeMs = 0;
         int currentBlockReadCount = 0;
@@ -276,10 +235,17 @@ public class SurfaceTestService
 
             if (readSuccess && bytesRead > 0)
             {
-                goodSectors += sectorsInThisRead;
+                // Check if this chunk was slow
+                if (readTimeMs >= slowThresholdMs)
+                {
+                    slowSectors += sectorsInThisRead;
+                }
+                else
+                {
+                    goodSectors += sectorsInThisRead;
+                }
                 totalBytesRead += bytesRead;
                 currentPosition += bytesRead;
-                bytesInCurrentBlock += bytesRead;
             }
             else
             {
@@ -288,7 +254,6 @@ public class SurfaceTestService
                 badSectors += badSectorsFound;
                 goodSectors += (bytesToRead / bytesPerSector) - badSectorsFound;
                 currentPosition += bytesToRead;
-                bytesInCurrentBlock += bytesToRead;
                 currentBlockHasBadSectors = true;
 
                 // Re-seek to continue after the bad area
@@ -298,9 +263,20 @@ public class SurfaceTestService
             currentBlockTotalTimeMs += readTimeMs;
             currentBlockReadCount++;
 
-            // Check if we should update the current block
-            if (bytesInCurrentBlock >= bytesPerBlock || currentPosition >= totalSize)
+            // Calculate which block this position maps to
+            // Use: blockIndex = (int)((double)currentPosition / totalSize * totalBlocks)
+            // Clamped to [0, totalBlocks-1]
+            int blockIndex = (int)((double)currentPosition / totalSize * totalBlocks);
+            if (blockIndex >= totalBlocks) blockIndex = totalBlocks - 1;
+            if (blockIndex < 0) blockIndex = 0;
+
+            // Did we cross into a new block (or is this the final position)?
+            if (blockIndex != lastBlockIndex || currentPosition >= totalSize)
             {
+                // Emit a progress update for the completed block
+                int reportBlockIndex = lastBlockIndex >= 0 ? lastBlockIndex : blockIndex;
+                if (lastBlockIndex < 0) reportBlockIndex = 0;
+
                 var avgBlockReadTime = currentBlockReadCount > 0 ? currentBlockTotalTimeMs / currentBlockReadCount : 0;
                 var progressPercent = (currentPosition * 100.0) / totalSize;
                 var elapsedSeconds = overallStopwatch.Elapsed.TotalSeconds;
@@ -315,19 +291,18 @@ public class SurfaceTestService
                     TotalSectors = totalSectors,
                     GoodSectors = goodSectors,
                     BadSectors = badSectors,
+                    SlowSectors = slowSectors,
                     AverageSpeedMBps = avgSpeedMBps,
                     CurrentSpeedMBps = currentSpeedMBps,
-                    BlockIndex = currentBlockIndex,
+                    BlockIndex = reportBlockIndex,
                     BlockIsGood = !currentBlockHasBadSectors,
                     BlockReadTimeMs = avgBlockReadTime
                 };
 
                 ProgressUpdated?.Invoke(this, progress);
 
-                // Move to next block
-                currentBlockIndex++;
-                if (currentBlockIndex >= totalBlocks) currentBlockIndex = totalBlocks - 1;
-                bytesInCurrentBlock = 0;
+                // Reset per-block accumulators for the new block
+                lastBlockIndex = blockIndex;
                 currentBlockHasBadSectors = false;
                 currentBlockTotalTimeMs = 0;
                 currentBlockReadCount = 0;
@@ -364,45 +339,4 @@ public class SurfaceTestService
         return badSectorCount;
     }
 
-    private string? GetPhysicalDriveFromLetter(string driveLetter)
-    {
-        try
-        {
-            using var searcher = new System.Management.ManagementObjectSearcher(
-                $"SELECT * FROM Win32_DiskDrive");
-
-            foreach (var disk in searcher.Get())
-            {
-                var deviceId = disk["DeviceID"]?.ToString();
-                if (string.IsNullOrEmpty(deviceId)) continue;
-
-                using var partitionSearcher = new System.Management.ManagementObjectSearcher(
-                    $"ASSOCIATORS OF {{Win32_DiskDrive.DeviceID='{deviceId}'}} WHERE AssocClass=Win32_DiskDriveToDiskPartition");
-
-                foreach (var partition in partitionSearcher.Get())
-                {
-                    var partitionId = partition["DeviceID"]?.ToString();
-                    if (string.IsNullOrEmpty(partitionId)) continue;
-
-                    using var logicalSearcher = new System.Management.ManagementObjectSearcher(
-                        $"ASSOCIATORS OF {{Win32_DiskPartition.DeviceID='{partitionId}'}} WHERE AssocClass=Win32_LogicalDiskToPartition");
-
-                    foreach (var logical in logicalSearcher.Get())
-                    {
-                        var logicalId = logical["DeviceID"]?.ToString()?.TrimEnd(':');
-                        if (logicalId?.Equals(driveLetter, StringComparison.OrdinalIgnoreCase) == true)
-                        {
-                            return deviceId;
-                        }
-                    }
-                }
-            }
-        }
-        catch
-        {
-            // Failed to get physical drive, return null
-        }
-
-        return null;
-    }
 }
