@@ -8,7 +8,7 @@
     <UseWPF>true</UseWPF>
     <AssemblyName>JFStorageTester</AssemblyName>
     <RootNamespace>JFStorageTester</RootNamespace>
-    <Version>1.0.4</Version>
+    <Version>1.0.4.2</Version>
     <AssemblyTitle>JF Storage Tester</AssemblyTitle>
     <Description>Storage media surface and speed testing utility</Description>
     <Company>JF</Company>

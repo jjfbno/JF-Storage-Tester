@@ -2,7 +2,7 @@
 ; Copyright (c) 2026 JF
 
 #define MyAppName "JF Storage Tester"
-#define MyAppVersion "1.0.4"
+#define MyAppVersion "1.0.4.2"
 #define MyAppPublisher "JF"
 #define MyAppExeName "JFStorageTester.exe"
 
@@ -31,6 +31,11 @@ MinVersion=10.0
 ; Uninstaller
 UninstallDisplayIcon={app}\{#MyAppExeName}
 UninstallDisplayName={#MyAppName}
+; Close running instances before installing (critical for updates)
+CloseApplications=force
+CloseApplicationsFilter=*.exe
+RestartApplications=no
+AppMutex=JFStorageTester_SingleInstance
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -47,7 +52,10 @@ Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent runascurrentuser
+; Interactive installs: show checkbox to launch app
+Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent shellexec runascurrentuser
+; Silent installs (auto-update): always launch the app
+Filename: "{app}\{#MyAppExeName}"; Flags: nowait skipifnotsilent shellexec runascurrentuser
 
 
 

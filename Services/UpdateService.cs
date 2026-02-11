@@ -70,7 +70,10 @@ public class UpdateService
         get
         {
             var version = Assembly.GetExecutingAssembly().GetName().Version;
-            return version != null ? $"{version.Major}.{version.Minor}.{version.Build}" : "1.0.0";
+            if (version == null) return "1.0.0";
+            return version.Revision > 0
+                ? $"{version.Major}.{version.Minor}.{version.Build}.{version.Revision}"
+                : $"{version.Major}.{version.Minor}.{version.Build}";
         }
     }
     
@@ -112,19 +115,19 @@ public class UpdateService
             result.ReleaseNotes = release.Body;
             result.ReleaseUrl = release.HtmlUrl;
             
-            // Find the exe asset
-            var exeAsset = release.Assets.FirstOrDefault(a =>
-                a.Name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) &&
-                !a.Name.Contains("Setup", StringComparison.OrdinalIgnoreCase));
-            
-            // If no portable exe, try setup exe
-            exeAsset ??= release.Assets.FirstOrDefault(a =>
+            // Find the Setup installer asset (preferred for updates)
+            var setupAsset = release.Assets.FirstOrDefault(a =>
+                a.Name.Contains("Setup", StringComparison.OrdinalIgnoreCase) &&
                 a.Name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase));
             
-            if (exeAsset != null)
+            // Fall back to portable exe if no installer
+            setupAsset ??= release.Assets.FirstOrDefault(a =>
+                a.Name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase));
+            
+            if (setupAsset != null)
             {
-                result.DownloadUrl = exeAsset.DownloadUrl;
-                result.DownloadSize = exeAsset.Size;
+                result.DownloadUrl = setupAsset.DownloadUrl;
+                result.DownloadSize = setupAsset.Size;
             }
             else
             {
@@ -151,19 +154,15 @@ public class UpdateService
     {
         try
         {
-            // Get the current exe path
-            var currentExePath = Process.GetCurrentProcess().MainModule?.FileName;
-            if (string.IsNullOrEmpty(currentExePath))
-            {
-                throw new Exception("Could not determine current executable path");
-            }
+            // Download to temp folder so there's no file locking issue
+            var tempDir = Path.Combine(Path.GetTempPath(), "JFStorageTester_Update");
+            Directory.CreateDirectory(tempDir);
             
-            var currentDir = Path.GetDirectoryName(currentExePath)!;
-            var tempPath = Path.Combine(currentDir, "JFStorageTester_update.exe");
-            var scriptPath = Path.Combine(currentDir, "update.ps1");
-            var currentPid = Environment.ProcessId;
+            var fileName = Path.GetFileName(new Uri(downloadUrl).LocalPath);
+            if (string.IsNullOrEmpty(fileName)) fileName = "JFStorageTester_Setup.exe";
+            var installerPath = Path.Combine(tempDir, fileName);
             
-            // Download the new version
+            // Download the installer
             using var response = await _httpClient.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead, ct);
             response.EnsureSuccessStatusCode();
             
@@ -171,7 +170,7 @@ public class UpdateService
             var downloadedBytes = 0L;
             
             using (var contentStream = await response.Content.ReadAsStreamAsync(ct))
-            using (var fileStream = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None, 8192, true))
+            using (var fileStream = new FileStream(installerPath, FileMode.Create, FileAccess.Write, FileShare.None, 8192, true))
             {
                 var buffer = new byte[8192];
                 int bytesRead;
@@ -189,78 +188,23 @@ public class UpdateService
                 }
             }
             
-            // Create PowerShell script that waits for this process to exit
-            var scriptContent = @$"
-# Update script for JF Storage Tester
-$exePath = '{currentExePath.Replace("'", "''")}'
-$newPath = '{tempPath.Replace("'", "''")}'
-$procId = {currentPid}
-
-# Wait for the app to fully exit
-try {{
-    $proc = Get-Process -Id $procId -ErrorAction Stop
-    Write-Host 'Waiting for application to close...'
-    $proc.WaitForExit(60000) | Out-Null
-}} catch {{
-    # Process already exited
-}}
-
-# Extra wait to ensure file handles are released
-Start-Sleep -Seconds 3
-
-# Try to delete and replace with retries
-$maxRetries = 15
-$success = $false
-
-for ($i = 1; $i -le $maxRetries; $i++) {{
-    Write-Host ""Attempt $i of $maxRetries...""
-    try {{
-        if (Test-Path $exePath) {{
-            Remove-Item -Path $exePath -Force -ErrorAction Stop
-        }}
-        Move-Item -Path $newPath -Destination $exePath -Force -ErrorAction Stop
-        $success = $true
-        Write-Host 'Update successful!'
-        break
-    }} catch {{
-        Write-Host ""Failed: $($_.Exception.Message)""
-        Start-Sleep -Seconds 2
-    }}
-}}
-
-if ($success) {{
-    Start-Process -FilePath $exePath
-}} else {{
-    Add-Type -AssemblyName PresentationFramework
-    [System.Windows.MessageBox]::Show('Update failed - the application file is still locked. Please close any other instances and try again, or update manually.', 'Update Error', 'OK', 'Error')
-}}
-
-# Clean up
-Start-Sleep -Seconds 1
-Remove-Item -Path $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue
-";
+            // Release the app mutex BEFORE launching installer
+            // so Inno Setup doesn't think we're still running
+            App.ReleaseAppMutex();
             
-            await File.WriteAllTextAsync(scriptPath, scriptContent, ct);
-            
-            // Start the PowerShell updater script
+            // Launch the installer with /VERYSILENT (no UI at all)
             var psi = new ProcessStartInfo
             {
-                FileName = "powershell.exe",
-                Arguments = $"-ExecutionPolicy Bypass -NoProfile -File \"{scriptPath}\"",
+                FileName = installerPath,
+                Arguments = "/VERYSILENT /CLOSEAPPLICATIONS /RESTARTAPPLICATIONS",
                 UseShellExecute = true,
-                WindowStyle = ProcessWindowStyle.Hidden
+                Verb = "runas" // Request admin elevation
             };
             
             Process.Start(psi);
             
-            // Give the script a moment to start
-            await Task.Delay(500, ct);
-            
-            // Exit the application
-            System.Windows.Application.Current.Dispatcher.Invoke(() =>
-            {
-                System.Windows.Application.Current.Shutdown();
-            });
+            // Exit immediately so the exe file is unlocked for the installer
+            Environment.Exit(0);
             
             return true;
         }
